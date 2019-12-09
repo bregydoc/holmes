@@ -2,8 +2,10 @@ from source import RawSource, SourceDescription
 from bs4 import BeautifulSoup
 import requests
 from os import path
-from datetime import datetime as dt
-import locale
+import datetime
+import re
+import constants
+from typing import List
 
 
 class Source(RawSource):
@@ -20,7 +22,7 @@ class Source(RawSource):
             "ctl00$ContentPlaceHolder1$txtBusqueda": "",
             "ctl00$ContentPlaceHolder1$ddlSecciones": ""
         }
-        self.raw_dataset: list = []
+        self.raw_dataset: List[map] = []
 
     def describe(self):
         return SourceDescription(name="el peruano", version='0.0.1')
@@ -31,10 +33,21 @@ class Source(RawSource):
         return "ctl00$ContentPlaceHolder1$rptPaginado$ctl{}$lnkbtnPaging".format(p)
 
     @staticmethod
+    def parse_time(str_time: str):
+        if re.match("(\\d{2})+ de \\w+ de \\d{4}", str_time):
+            r = str_time.split(" de ")
+            day = int(r[0].strip())
+            month = constants.spanish_month(r[1].strip())
+            year = int(r[2].strip())
+            return datetime.date(year, month, day)
+        else:
+            return datetime.date.today()
+
+    @staticmethod
     def trim(s: str) -> str:
         return s.replace("'", "").replace("\\", "")
 
-    def load_info_person(self, person_name: str):
+    def load_info_person(self, person_name: str, deep: bool = False):
         self.state_params["ctl00$ContentPlaceHolder1$txtBusqueda"] = person_name
         self.state_params["ctl00$ContentPlaceHolder1$ddlSecciones"] = "1"
 
@@ -56,14 +69,15 @@ class Source(RawSource):
         self.state_params["__VIEWSTATEGENERATOR"] = v_gen.get('value')
         self.state_params["__EVENTVALIDATION"] = e_val.get('value')
 
-        news: list = []
+        news: List[map] = []
 
         last, diff, i = 0, 0, 0
         last_head, head = "", ""
 
         while diff == 0 or i < 2:
             self.state_params["__EVENTTARGET"] = self.page(i)
-            print(self.page(i))
+            # print(self.page(i))
+            print(".", end="")
             res = requests.post(url, data=self.state_params)
 
             soup = BeautifulSoup(res.content.decode('utf-8'), "html.parser")
@@ -94,7 +108,7 @@ class Source(RawSource):
                 launch_time = launch_time.text
 
                 p = ps[1]
-                body = p.text
+                description = p.text
 
                 a = li.find("a")
                 a = a if a is not None else {"href": "/"}
@@ -105,11 +119,16 @@ class Source(RawSource):
                 time = chunks[1] if len(chunks) > 1 else ""
                 time = time.strip()
 
-                # time = dt.strptime(time, "%d de %B de %Y")
+                timestamp = self.parse_time(time)
+
                 news.append({
                     "title": t,
-                    "time": time,
-                    "body": body,
+                    "parent": self.describe().name,
+                    "person": person_name,
+                    "timestamp": timestamp,
+                    "raw_time": time,
+                    "description": description,
+                    "body": "unload",
                     "link": path.join(self.base_url, self.trim(a['href'])),
                     "image": self.trim(img["src"])
                 })
@@ -121,4 +140,16 @@ class Source(RawSource):
             last = len(lis)
             i += 1
 
+        print(" total entries: ", len(news))
+
+        if deep:
+            for i, entry in enumerate(news):
+                res = requests.get(entry["link"])
+                print("#", end="")
+                soup = BeautifulSoup(res.content.decode('utf-8', 'ignore'), 'html.parser')
+                article = soup.find("article", {"class": "notatexto"})
+                if article is not None:
+                    body = article.get_text(strip=True)
+                    body = "".join(body.split("\n")[1:])
+                    news[i]["body"] = body
         self.raw_dataset = news

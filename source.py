@@ -7,7 +7,9 @@ from typing import List
 class RawEntry:
     title: str
     url: str
-    raw_body: str
+    description: str
+    body: str
+    tags: List[str]
     principal_image_url: str = ""
     sentiment: float = 0.5
     timestamp: float = time.time()
@@ -29,5 +31,5 @@ class RawSource:
     def describe(self) -> SourceDescription:
         pass
 
-    def load_info_person(self, person_name: str):
+    def load_info_person(self, person_name: str, deep: bool = False):
         pass
